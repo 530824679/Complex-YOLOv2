@@ -18,9 +18,8 @@ class TFRecord(object):
         self.data_path = path_params['data_path']
         self.tfrecord_dir = path_params['tfrecord_dir']
         self.train_tfrecord_name = path_params['train_tfrecord_name']
-        self.test_tfrecord_name = path_params['test_tfrecord_name']
-        self.image_width = model_params['image_width']
-        self.image_height = model_params['image_height']
+        self.input_width = model_params['input_width']
+        self.input_height = model_params['input_height']
         self.channels = model_params['channels']
         self.grid_height = model_params['grid_height']
         self.grid_width = model_params['grid_width']
@@ -30,7 +29,7 @@ class TFRecord(object):
 
     # 数值形式的数据,首先转换为string,再转换为int形式进行保存
     def _int64_feature(self, value):
-        return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+        return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
 
     # 数组形式的数据,首先转换为string,再转换为二进制形式进行保存
     def _bytes_feature(self, value):
@@ -41,83 +40,70 @@ class TFRecord(object):
         trainval_path = os.path.join(self.data_path, 'ImageSets', 'Main', 'trainval.txt')
 
         tf_file = os.path.join(self.tfrecord_dir, self.train_tfrecord_name)
-        if not os.path.exists(tf_file):
-            # 循环写入每一帧点云转换的bev和标签到tfrecord文件
-            writer = tf.python_io.TFRecordWriter(tf_file)
-            with open(trainval_path, 'r') as read:
-                lines = read.readlines()
-                for line in lines:
-                    pcd_num = line[0:-1]
-                    image = self.dataset.load_bev_image(pcd_num)
-                    label = self.dataset.load_bev_label(pcd_num)
+        if os.path.exists(tf_file):
+            os.remove(tf_file)
 
-                    image_string = image.tostring()
-                    label_string = label.tostring()
+        writer = tf.python_io.TFRecordWriter(tf_file)
+        with open(trainval_path, 'r') as read:
+            lines = read.readlines()
+            for line in lines:
+                pcd_num = line[0:-1]
+                image = self.dataset.load_bev_image(pcd_num)
+                bboxes = self.dataset.load_bev_label(pcd_num)
 
-                    example = tf.train.Example(features=tf.train.Features(
-                        feature={
-                            'image': tf.train.Feature(bytes_list=tf.train.BytesList(value=[image_string])),
-                            'label': tf.train.Feature(bytes_list=tf.train.BytesList(value=[label_string]))
-                        }))
-                    writer.write(example.SerializeToString())
-            writer.close()
-            print('Finish trainval.tfrecord Done')
+                image_raw = image.tobytes()
+                bbox_raw = bboxes.tobytes()
 
-    def parse_single_example(self, file_name):
+                example = tf.train.Example(features=tf.train.Features(
+                    feature={
+                        'image': tf.train.Feature(bytes_list=tf.train.BytesList(value=[image_raw])),
+                        'bbox': tf.train.Feature(bytes_list=tf.train.BytesList(value=[bbox_raw]))
+                    }))
+                writer.write(example.SerializeToString())
+        writer.close()
+        print('Finish trainval.tfrecord Done')
+
+    def parse_single_example(self, serialized_example):
         """
         :param file_name:待解析的tfrecord文件的名称
         :return: 从文件中解析出的单个样本的相关特征，image, label
         """
-        tfrecord_file = os.path.join(self.tfrecord_dir, self.train_tfrecord_name)
-
-        # 定义解析TFRecord文件操作
-        reader = tf.TFRecordReader()
-
-        # 创建样本文件名称队列
-        filename_queue = tf.train.string_input_producer([tfrecord_file])
-
-        # 解析单个样本文件
-        _, serialized_example = reader.read(filename_queue)
         features = tf.parse_single_example(
             serialized_example,
             features={
                 'image': tf.FixedLenFeature([], tf.string),
-                'label': tf.FixedLenFeature([], tf.string)
+                'bbox': tf.FixedLenFeature([], tf.string)
             })
 
+        tf_image = tf.decode_raw(features['image'], tf.uint8)
+        tf_bbox = tf.decode_raw(features['bbox'], tf.float32)
 
-        image = features['image']
-        label = features['label']
+        tf_image = tf.reshape(tf_image, [self.input_height, self.input_width, 3])
+        tf_label = tf.reshape(tf_bbox, [150, 7])
 
-        return image, label
+        tf_image, y_true = tf.py_func(self.dataset.preprocess_true_data, inp=[tf_image, tf_label], Tout=[tf.float32, tf.float32])
+        y_true = tf.reshape(y_true, [self.grid_height, self.grid_width, 5, 6])
 
-    def parse_batch_examples(self, file_name):
+        return tf_image, y_true
+
+    def create_dataset(self, filenames, batch_num, batch_size=1, is_shuffle=False):
         """
-        :param file_name:待解析的tfrecord文件的名称
-        :return: 解析得到的batch_size个样本
+        :param filenames: record file names
+        :param batch_size: batch size
+        :param is_shuffle: whether shuffle
+        :param n_repeats: number of repeats
+        :return:
         """
-        batch_size = self.batch_size
-        min_after_dequeue = 100
-        num_threads = 8
-        capacity = min_after_dequeue + 3 * batch_size
+        dataset = tf.data.TFRecordDataset(filenames)
 
+        dataset = dataset.map(self.parse_single_example, num_parallel_calls=4)
+        if is_shuffle:
+            dataset = dataset.shuffle(batch_num)
+        dataset = dataset.batch(batch_size)
+        dataset = dataset.repeat()
+        dataset = dataset.prefetch(batch_size)
 
-        image, label = self.parse_single_example(file_name)
-        image_batch, label_batch = tf.train.shuffle_batch([image, label],
-                                                          batch_size=batch_size,
-                                                          num_threads=num_threads,
-                                                          capacity=capacity,
-                                                          min_after_dequeue=min_after_dequeue)
-
-        # 进行解码
-        image_batch = tf.decode_raw(image_batch, tf.float32)
-        label_batch = tf.decode_raw(label_batch, tf.float32)
-
-        # 转换为网络输入所要求的形状
-        image_batch = tf.reshape(image_batch, [self.batch_size, self.image_height, self.image_width, self.channels])
-        label_batch = tf.reshape(label_batch, [self.batch_size, self.grid_height, self.grid_width, 7 + self.class_num])
-
-        return image_batch, label_batch
+        return dataset
 
 if __name__ == '__main__':
     tfrecord = TFRecord()

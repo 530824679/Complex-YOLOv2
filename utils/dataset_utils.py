@@ -9,7 +9,14 @@
 
 import os
 import numpy as np
+import tensorflow as tf
 from cfg.config import path_params
+
+def total_sample(file_name):
+    sample_nums = 0
+    for record in tf.python_io.tf_record_iterator(file_name):
+        sample_nums += 1
+    return  sample_nums
 
 def create_trainval_txt(root_path):
     data_path = os.path.join(root_path, 'object/training/livox')

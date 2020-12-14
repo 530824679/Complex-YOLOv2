@@ -2,25 +2,26 @@
 
 import os
 import time
+import math
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+from tqdm import tqdm
 
 from cfg.config import path_params, model_params, solver_params
 from model import network
-from utils import loss_utils
 from data import dataset, tfrecord
-
+from utils.dataset_utils import *
 
 def train():
     start_step = 0
     log_step = solver_params['log_step']
-    display_step = solver_params['display_step']
     restore = solver_params['restore']
     checkpoint_dir = path_params['checkpoints_dir']
     checkpoints_name = path_params['checkpoints_name']
     tfrecord_dir = path_params['tfrecord_dir']
     tfrecord_name = path_params['train_tfrecord_name']
     log_dir = path_params['logs_dir']
+    batch_size = solver_params['batch_size']
 
     # 配置GPU
     gpu_options = tf.GPUOptions(allow_growth=True)
@@ -29,54 +30,46 @@ def train():
     # 解析得到训练样本以及标注
     data = tfrecord.TFRecord()
     train_tfrecord = os.path.join(tfrecord_dir, tfrecord_name)
-    image_batch, label_batch = data.parse_batch_examples(train_tfrecord)
+    data_num = total_sample(train_tfrecord)
+    batch_num = int(math.ceil(float(data_num) / batch_size))
+    dataset = data.create_dataset(train_tfrecord, batch_num, batch_size=batch_size, is_shuffle=True)
+    iterator = dataset.make_one_shot_iterator()
+    images, y_true = iterator.get_next()
 
-    # 定义输入的占位符
-    inputs = tf.placeholder(dtype=tf.float32, shape=[None, model_params['image_height'], model_params['image_width'], model_params['channels']], name='inputs')
-    labels = tf.placeholder(dtype=tf.float32, shape=[None, model_params['grid_height'], model_params['grid_width'], model_params['anchor_num'], 8], name='labels')
+    images.set_shape([None, 608, 608, 3])
+    y_true.set_shape([None, 19, 19, 5, 8])
 
     # 构建网络
-    Model = network.Network()
-    logits = Model.build_network(inputs)
+    Model = network.Network(is_train=True)
+    logits = Model.build_network(images)
 
     # 计算损失函数
-    Losses = loss_utils.Loss(logits, labels, 'loss')
-    loss_op = tf.losses.get_total_loss()
+    total_loss, diou_loss, confs_loss, class_loss = Model.calc_loss(logits, y_true)
 
-    vars = tf.trainable_variables()
-    l2_reg_loss_op = tf.add_n([tf.nn.l2_loss(var) for var in vars]) * solver_params['weight_decay']
-    total_loss = loss_op + l2_reg_loss_op
-    tf.summary.scalar('total_loss', total_loss)
-
-    # 创建全局的步骤
-    global_step = tf.train.create_global_step()
-    # 设定变化的学习率
-    learning_rate = tf.train.exponential_decay(
-        solver_params['learning_rate'],
-        global_step,
-        solver_params['decay_steps'],
-        solver_params['decay_rate'],
-        solver_params['staircase'],
-        name='learning_rate')
-
-    # 设置优化器
+    global_step = tf.Variable(0, trainable=False)
+    learning_rate = tf.train.exponential_decay(solver_params['lr'], global_step, solver_params['decay_steps'],
+                                               solver_params['decay_rate'], staircase=True)
+    optimizer = tf.train.AdamOptimizer(learning_rate)
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
-        # 采用的优化方法是随机梯度下降
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
-        train_op = slim.learning.create_train_op(total_loss, optimizer, global_step)
+        train_op = optimizer.minimize(total_loss, global_step=global_step)
 
-    # 模型保存
-    save_variable = tf.global_variables()
-    saver = tf.train.Saver(save_variable, max_to_keep=1000)
+    # 配置tensorboard
+    tf.summary.scalar("learning_rate", learning_rate)
+    tf.summary.scalar('total_loss', total_loss)
+    tf.summary.scalar("diou_loss", diou_loss)
+    tf.summary.scalar("confs_loss", confs_loss)
+    tf.summary.scalar("class_loss", class_loss)
 
     # 配置tensorboard
     summary_op = tf.summary.merge_all()
     summary_writer = tf.summary.FileWriter(log_dir, graph=tf.get_default_graph(), flush_secs=60)
 
+    # 模型保存
+    save_variable = tf.global_variables()
+    saver = tf.train.Saver(save_variable, max_to_keep=50)
     with tf.Session(config=config) as sess:
-        init_var_op = tf.global_variables_initializer()
-        sess.run(init_var_op)
+        sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()])
 
         if restore == True:
             ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
@@ -90,35 +83,31 @@ def train():
             else:
                 print("Failed to find a checkpoint")
 
-        coordinate = tf.train.Coordinator()
-        threads = tf.train.start_queue_runners(coord=coordinate, sess=sess)
         summary_writer.add_graph(sess.graph)
 
-        for epoch in range(start_step + 1, solver_params['max_iter']):
-            start_time = time.time()
+        print('\n----------- start to train -----------\n')
+        for epoch in range(start_step + 1, solver_params['epoches']):
+            train_epoch_loss, train_epoch_diou_loss, train_epoch_confs_loss, train_epoch_class_loss = [], [], [], []
+            for index in tqdm(range(batch_num)):
+                _, summary_, loss_, diou_loss_, confs_loss_, class_loss_, global_step_, lr = sess.run(
+                    [train_op, summary_op, total_loss, diou_loss, confs_loss, class_loss, global_step, learning_rate])
 
-            if coordinate.should_stop():
-                break
-            image, label = sess.run([image_batch, label_batch])
-            feed_dict = {inputs: image, outputs: label}
-            _, loss, current_global_step = sess.run([train_op, total_loss, global_step], feed_dict=feed_dict)
+                train_epoch_loss.append(loss_)
+                train_epoch_diou_loss.append(diou_loss_)
+                train_epoch_confs_loss.append(confs_loss_)
+                train_epoch_class_loss.append(class_loss_)
 
-            end_time = time.time()
+                summary_writer.add_summary(summary_, global_step_)
 
-            if epoch % solver_params['save_step'] == 0:
-                save_path = saver.save(sess, os.path.join(checkpoint_dir, checkpoints_name), global_step=epoch)
-                print('Save modle into {}....'.format(save_path))
+            train_epoch_loss, train_epoch_diou_loss, train_epoch_confs_loss, train_epoch_class_loss = np.mean(
+                train_epoch_loss), np.mean(train_epoch_diou_loss), np.mean(train_epoch_confs_loss), np.mean(
+                train_epoch_class_loss)
+            print(
+                "Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, diou_loss: {:.3f}, confs_loss: {:.3f}, class_loss: {:.3f}".format(
+                    epoch, global_step_, lr, train_epoch_loss, train_epoch_diou_loss, train_epoch_confs_loss,
+                    train_epoch_class_loss))
+            saver.save(sess, os.path.join(checkpoint_dir, checkpoints_name), global_step=epoch)
 
-            if epoch % log_step == 0:
-                summary = sess.run(summary_op, feed_dict=feed_dict)
-                summary_writer.add_summary(summary, global_step=epoch)
-
-            if epoch % display_step == 0:
-                per_iter_time = end_time - start_time
-                print("step:{:.0f}  total_loss:  {:.5f} {:.2f} s/iter".format(epoch, loss, per_iter_time))
-
-        coordinate.request_stop()
-        coordinate.join(threads)
         sess.close()
 
 if __name__ == '__main__':

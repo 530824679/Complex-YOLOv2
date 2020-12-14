@@ -18,13 +18,15 @@ import numpy as np
 import tensorflow as tf
 from cfg.config import data_params, path_params, model_params, classes_map, anchors
 from utils.process_utils import *
+from data.augmentation import *
 
 class Dataset(object):
     def __init__(self):
         self.data_path = path_params['data_path']
         self.anchors = anchors
-        self.image_height = model_params['image_height']
-        self.image_width = model_params['image_width']
+        self.num_classes = model_params['num_classes']
+        self.input_height = model_params['input_height']
+        self.input_width = model_params['input_width']
         self.grid_height = model_params['grid_height']
         self.grid_width = model_params['grid_width']
         self.iou_threshold = model_params['iou_threshold']
@@ -46,8 +48,7 @@ class Dataset(object):
         txt_path = os.path.join(self.data_path, "object/training/label", data_num + '.txt')
         label = self.load_label(txt_path)
         bev_label = self.transform_bev_label(label)
-        encoded_label = self.encode(bev_label)
-        return encoded_label
+        return bev_label
 
     def load_pcd(self, pcd_path):
         pts = []
@@ -106,51 +107,43 @@ class Dataset(object):
         for line in lines:
             data = line.split(' ')
             data[4:] = [float(t) for t in data[4:]]
-            true_boxes[index, 0] = self.cls_type_to_id(data)
-            true_boxes[index, 1], true_boxes[index, 2], true_boxes[index, 3] = self.calc_xyz(data)
-            true_boxes[index, 4], true_boxes[index, 5], true_boxes[index, 6] = self.calc_hwl(data)
-            true_boxes[index, 7] = self.calc_yaw(data)
+            true_boxes[index, 0], true_boxes[index, 1], true_boxes[index, 2] = self.calc_xyz(data)
+            true_boxes[index, 3], true_boxes[index, 4], true_boxes[index, 5] = self.calc_hwl(data)
+            true_boxes[index, 6] = self.calc_yaw(data)
+            true_boxes[index, 7] = self.cls_type_to_id(data)
             index += 1
 
         return true_boxes
 
     def transform_bev_label(self, true_box):
-        bev_height = model_params['image_height']
-        bev_width = model_params['image_width']
+        bev_height = model_params['input_height']
+        bev_width = model_params['input_width']
 
         range_x = data_params['x_max'] - data_params['x_min']
         range_y = data_params['y_max'] - data_params['y_min']
 
-        boxes_num = true_box.shape[0]
-
-        num = 0
-        # for obj in objects:
-        for i in range(boxes_num):
-            if (true_box[i][1] > data_params['x_min']) & (true_box[i][1] < data_params['x_max']) & \
-                    (true_box[i][2] > data_params['y_min']) & (true_box[i][2] < data_params['y_max']):
-                num = num + 1
-
-        # true_box: class, x, y, z, h, w, l, rz
-        # bev_box: class, x, y, w, l, rz
-        bev_box = np.zeros([num, 6], dtype=np.float32)
+        # true_box: x, y, z, h, w, l, rz, class
+        # bev_box: x, y, w, l, rz, class
+        bev_box = np.zeros([150, 6], dtype=np.float32)
 
         index = 0
+        boxes_num = true_box.shape[0]
         for j in range(boxes_num):
             if (true_box[j][1] > data_params['x_min']) & (true_box[j][1] < data_params['x_max']) & (
                     true_box[j][2] > data_params['y_min']) & (true_box[j][2] < data_params['y_max']):
-                bev_box[index][0] = true_box[j][0]
-                bev_box[index][1] = (true_box[j][2] + 0.5 * range_y) / range_y * bev_width
-                bev_box[index][2] = true_box[j][1] / range_x * bev_height
-                bev_box[index][3] = true_box[j][5] / range_y * bev_width
-                bev_box[index][4] = true_box[j][6] / range_x * bev_height
+                bev_box[index][0] = (true_box[j][1] + 0.5 * range_y) / range_y * bev_width
+                bev_box[index][1] = true_box[j][0] / range_x * bev_height
+                bev_box[index][2] = true_box[j][4] / range_y * bev_width
+                bev_box[index][3] = true_box[j][5] / range_x * bev_height
+                bev_box[index][4] = true_box[j][6]
                 bev_box[index][5] = true_box[j][7]
                 index = index + 1
 
         return bev_box
 
     def transform_bev_image(self, pts):
-        bev_height = model_params['image_height']
-        bev_width = model_params['image_width']
+        bev_height = model_params['input_height']
+        bev_width = model_params['input_width']
 
         range_x = data_params['x_max'] - data_params['x_min']
         range_y = data_params['y_max'] - data_params['y_min']
@@ -203,88 +196,60 @@ class Dataset(object):
 
         return pts
 
-    def encode(self, labels):
-        """
-        Encode the label to match the model output format
-        param labels (array): class, x, y, w, h, angle
-        param anchors (array): anchors
-        return: encoded label
-        """
+    def preprocess_true_data(self, image, labels):
+        image = np.array(image)
+        image, labels = random_horizontal_flip(image, labels)
+
         range_x = data_params['x_max'] - data_params['x_min']
         range_y = data_params['y_max'] - data_params['y_min']
 
-        anchors_on_image = np.array([self.image_width, self.image_height]) * anchors / np.array([range_y, range_x])
-        n_anchors = np.shape(anchors_on_image)[0]
+        anchor_array = np.array([self.input_width, self.input_height]) * anchors / np.array([range_y, range_x])
+        n_anchors = np.shape(anchor_array)[0]
 
-        encoded_labels = np.zeros([self.grid_height, self.grid_width, n_anchors, (6 + 1 + 1)], dtype=np.float32)
-        for i in range(labels.shape[0]):
-            rois = labels[i][1:]
-            classes = np.array(labels[i][0], dtype=np.int32)
-            active_indexes = self.get_active_anchors(rois[2:4], anchors_on_image, self.iou_threshold)
-            grid_x, grid_y = self.get_grid_cell(rois, self.image_width, self.image_height, self.grid_width, self.grid_height)
-            for active_index in active_indexes:
-                anchor_label = self.roi2label(rois, anchors_on_image[active_index], self.image_width, self.image_height, self.grid_width, self.grid_height)
-                encoded_labels[grid_y, grid_x, active_index] = np.concatenate((anchor_label, [classes], [1.0]))
+        valid = (np.sum(labels, axis=-1) > 0).tolist()
+        labels = labels[valid]
 
-        return encoded_labels
+        y_true = np.zeros(shape=[self.grid_height, self.grid_width, n_anchors, (6 + 1 + self.num_classes)], dtype=np.float32)
 
-    def get_active_anchors(self, box_wh, anchors, iou_threshold):
-        """
-        Get the index of the anchor that matches the ground truth box
-        param box_wh (list, tuple):  Width and height of a box
-        param anchors (array): anchors
-        param iou_th: Match threshold
-        return (list):
-        """
-        index = []
-        iou_max, index_max = 0, 0
-        for i, a in enumerate(anchors):
-            iou = calc_iou_wh(box_wh, a)
-            if iou > iou_threshold:
-                index.append(i)
-            if iou > iou_max:
-                iou_max, index_max = iou, i
-        if len(index) == 0:
-            index.append(index_max)
-        return index
+        boxes_xy = (labels[:, 0:2] + labels[:, 2:4]) / 2
+        boxes_wh = labels[:, 2:4] - labels[:, 0:2]
+        true_boxes = np.concatenate([boxes_xy, boxes_wh, labels[:, 4]], axis=-1)
 
-    def get_grid_cell(self, roi, img_w, img_h, grid_w, grid_h):  # roi[x, y, w, h, rz]
-        """
-        Get the grid cell into which the object falls
-        param roi : [x, y, w, h, rz]
-        param img_w: The width of images
-        param img_h: The height of images
-        param grid_w:
-        param grid_h:
-        return (int, int):
-        """
-        x_center = roi[0]
-        y_center = roi[1]
-        grid_x = np.minimum(int(grid_w * x_center / img_w), grid_w - 1)
-        grid_y = np.minimum(int(grid_h * y_center / img_h), grid_h - 1)
-        return grid_x, grid_y
+        anchors_max = anchor_array / 2.
+        anchors_min = - anchor_array / 2.
 
-    def roi2label(self, roi, anchor, img_w, img_h, grid_w, grid_h):
-        """
-        Encode the label to match the model output format
-        param roi: x, y, w, h, angle
+        valid_mask = boxes_wh[:, 0] > 0
+        wh = boxes_wh[valid_mask]
 
-        return: encoded label
-        """
-        x_center = roi[0]
-        y_center = roi[1]
-        w = grid_w * roi[2] / img_w
-        h = grid_h * roi[3] / img_h
-        anchor_w = grid_w * anchor[0] / img_w
-        anchor_h = grid_h * anchor[1] / img_h
-        grid_x = grid_w * x_center / img_w
-        grid_y = grid_h * y_center / img_h
-        grid_x_offset = grid_x - int(grid_x)
-        grid_y_offset = grid_y - int(grid_y)
-        roi_w_scale = np.log(w / anchor_w + 1e-16)
-        roi_h_scale = np.log(h / anchor_h + 1e-16)
-        re = np.cos(roi[4])
-        im = np.sin(roi[4])
-        label = [grid_x_offset, grid_y_offset, roi_w_scale, roi_h_scale, re, im]
-        return label
+        # [N, 1, 2]
+        wh = np.expand_dims(wh, -2)
+        boxes_max = wh / 2.
+        boxes_min = - wh / 2.
 
+        # [N, 1, 2] & [5, 2] ==> [N, 5, 2]
+        intersect_mins = np.maximum(boxes_min, anchors_min)
+        intersect_maxs = np.minimum(boxes_max, anchors_max)
+        # [N, 5, 2]
+        intersect_wh = np.maximum(intersect_maxs - intersect_mins, 0.)
+        intersect_area = intersect_wh[..., 0] * intersect_wh[..., 1]
+        box_area = wh[..., 0] * wh[..., 1]
+        anchor_area = anchor_array[:, 0] * anchor_array[:, 1]
+        # [N, 5]
+        iou = intersect_area / (box_area + anchor_area - intersect_area + tf.keras.backend.epsilon())
+
+        # Find best anchor for each true box [N]
+        best_anchor = np.argmax(iou, axis=-1)
+
+        for t, k in enumerate(best_anchor):
+            i = int(np.floor(true_boxes[t, 0] / 32.))
+            j = int(np.floor(true_boxes[t, 1] / 32.))
+            c = labels[t, 4].astype('int32')
+            y_true[j, i, k, 0:4] = true_boxes[t, 0:4]
+            re = np.cos(true_boxes[t, 4])
+            im = np.sin(true_boxes[t, 4])
+            y_true[j, i, k, 4] = re
+            y_true[j, i, k, 5] = im
+            y_true[j, i, k, 6] = 1
+            y_true[j, i, k, 7 + c] = 1
+
+        return image, y_true
