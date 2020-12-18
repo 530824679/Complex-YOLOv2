@@ -12,7 +12,7 @@ path_params = {
     'data_path': '/home/chenwei/HDD/livox_dl/LIVOX',
     'checkpoints_dir': './checkpoints',
     'logs_dir': './logs',
-    'tfrecord_dir': '/home/chenwei/HDD/livox_dl/LIVOX/tfrecord',
+    'tfrecord_dir': '../tfrecord',
     'checkpoints_name': 'model.ckpt',
     'train_tfrecord_name': 'train.tfrecord',
     'test_output_dir': './test'
@@ -61,8 +61,4 @@ test_params = {
 
 classes_map = {'car': 0, 'bus': 1, 'truck': 1, 'pedestrains': 2}
 
-anchors = [[0.57273, 0.677385],
-           [1.87446, 2.06253],
-           [3.33843, 5.47434],
-           [7.88282, 3.52778],
-           [9.77052, 9.16828]]
+anchors = [[5, 5], [7, 15], [18, 43], [20, 46], [28, 104]]

@@ -89,9 +89,7 @@ class Network(object):
         feature_shape = tf.shape(feature_maps)[1:3]
 
         ratio = tf.cast([self.input_height, self.input_width] / feature_shape, tf.float32)
-        range_x = data_params['x_max'] - data_params['x_min']
-        range_y = data_params['y_max'] - data_params['y_min']
-        rescaled_anchors = np.array([feature_shape[1], feature_shape[0]]) * anchors / np.array([range_y, range_x])
+        rescaled_anchors = [(anchor[0] / ratio[1], anchor[1] / ratio[0]) for anchor in anchors]
 
         # 网络输出转化——偏移量、置信度、类别概率
         feature_maps = tf.reshape(feature_maps, [-1, feature_shape[0] * feature_shape[1], self.anchor_num, self.class_num + 7])
@@ -165,6 +163,8 @@ class Network(object):
         diou = tf.expand_dims(self.bbox_diou(pred_xywh, object_coords), axis=-1)
         diou_loss = object_masks * box_loss_scale * (1 - diou)
 
+        angle_loss = tf.square(object_angle - pred_box_remi)
+
         # shape: [N, 13, 13, 3, 1]
         conf_pos_mask = object_masks
         conf_neg_mask = (1 - object_masks) * ignore_mask
@@ -177,11 +177,12 @@ class Network(object):
         class_loss = object_masks * tf.nn.sigmoid_cross_entropy_with_logits(labels=object_probs, logits=pred_prob_logits)
 
         diou_loss = tf.reduce_mean(tf.reduce_sum(diou_loss, axis=[1, 2, 3, 4]))
+        angle_loss = tf.reduce_mean(tf.reduce_sum(angle_loss, axis=[1, 2, 3, 4]))
         conf_loss = tf.reduce_mean(tf.reduce_sum(conf_loss, axis=[1, 2, 3, 4]))
         class_loss = tf.reduce_mean(tf.reduce_sum(class_loss, axis=[1, 2, 3, 4]))
 
-        total_loss = diou_loss + conf_loss + class_loss
-        return total_loss, diou_loss, conf_loss, class_loss
+        total_loss = diou_loss + angle_loss + conf_loss + class_loss
+        return total_loss, diou_loss, angle_loss, conf_loss, class_loss
 
     def bbox_diou(self, boxes_1, boxes_2):
         """

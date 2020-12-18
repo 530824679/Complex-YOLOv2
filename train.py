@@ -37,14 +37,14 @@ def train():
     images, y_true = iterator.get_next()
 
     images.set_shape([None, 608, 608, 3])
-    y_true.set_shape([None, 19, 19, 5, 8])
+    y_true.set_shape([None, 19, 19, 5, 7 + model_params['num_classes']])
 
     # 构建网络
     Model = network.Network(is_train=True)
     logits = Model.build_network(images)
 
     # 计算损失函数
-    total_loss, diou_loss, confs_loss, class_loss = Model.calc_loss(logits, y_true)
+    total_loss, diou_loss, angle_loss, confs_loss, class_loss = Model.calc_loss(logits, y_true)
 
     global_step = tf.Variable(0, trainable=False)
     learning_rate = tf.train.exponential_decay(solver_params['lr'], global_step, solver_params['decay_steps'],
@@ -58,6 +58,7 @@ def train():
     tf.summary.scalar("learning_rate", learning_rate)
     tf.summary.scalar('total_loss', total_loss)
     tf.summary.scalar("diou_loss", diou_loss)
+    tf.summary.scalar("angle_loss", angle_loss)
     tf.summary.scalar("confs_loss", confs_loss)
     tf.summary.scalar("class_loss", class_loss)
 
@@ -87,25 +88,23 @@ def train():
 
         print('\n----------- start to train -----------\n')
         for epoch in range(start_step + 1, solver_params['epoches']):
-            train_epoch_loss, train_epoch_diou_loss, train_epoch_confs_loss, train_epoch_class_loss = [], [], [], []
+            train_epoch_loss, train_epoch_diou_loss, train_epoch_angle_loss, train_epoch_confs_loss, train_epoch_class_loss = [], [], [], [], []
             for index in tqdm(range(batch_num)):
-                _, summary_, loss_, diou_loss_, confs_loss_, class_loss_, global_step_, lr = sess.run(
-                    [train_op, summary_op, total_loss, diou_loss, confs_loss, class_loss, global_step, learning_rate])
+                _, summary_, loss_, diou_loss_, angle_loss_, confs_loss_, class_loss_, global_step_, lr = sess.run(
+                    [train_op, summary_op, total_loss, diou_loss, angle_loss, confs_loss, class_loss, global_step, learning_rate])
 
                 train_epoch_loss.append(loss_)
                 train_epoch_diou_loss.append(diou_loss_)
+                train_epoch_angle_loss.append(angle_loss_)
                 train_epoch_confs_loss.append(confs_loss_)
                 train_epoch_class_loss.append(class_loss_)
 
                 summary_writer.add_summary(summary_, global_step_)
 
-            train_epoch_loss, train_epoch_diou_loss, train_epoch_confs_loss, train_epoch_class_loss = np.mean(
-                train_epoch_loss), np.mean(train_epoch_diou_loss), np.mean(train_epoch_confs_loss), np.mean(
-                train_epoch_class_loss)
-            print(
-                "Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, diou_loss: {:.3f}, confs_loss: {:.3f}, class_loss: {:.3f}".format(
-                    epoch, global_step_, lr, train_epoch_loss, train_epoch_diou_loss, train_epoch_confs_loss,
-                    train_epoch_class_loss))
+            train_epoch_loss, train_epoch_diou_loss, train_epoch_angle_loss, train_epoch_confs_loss, train_epoch_class_loss = np.mean(
+                train_epoch_loss), np.mean(train_epoch_diou_loss), np.mean(train_epoch_angle_loss),np.mean(train_epoch_confs_loss), np.mean(train_epoch_class_loss)
+            print("Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, diou_loss: {:.3f}, angle_loss: {:.3f},confs_loss: {:.3f}, class_loss: {:.3f}".format(
+                    epoch, global_step_, lr, train_epoch_loss, train_epoch_diou_loss, train_epoch_angle_loss, train_epoch_confs_loss, train_epoch_class_loss))
             saver.save(sess, os.path.join(checkpoint_dir, checkpoints_name), global_step=epoch)
 
         sess.close()

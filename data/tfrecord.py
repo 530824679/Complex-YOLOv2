@@ -82,7 +82,7 @@ class TFRecord(object):
         tf_label = tf.reshape(tf_bbox, [150, 7])
 
         tf_image, y_true = tf.py_func(self.dataset.preprocess_true_data, inp=[tf_image, tf_label], Tout=[tf.float32, tf.float32])
-        y_true = tf.reshape(y_true, [self.grid_height, self.grid_width, 5, 6])
+        y_true = tf.reshape(y_true, [self.grid_height, self.grid_width, 5, 6 + 1 + self.class_num])
 
         return tf_image, y_true
 
@@ -109,27 +109,25 @@ if __name__ == '__main__':
     tfrecord = TFRecord()
     tfrecord.create_tfrecord()
 
-    # file = './tfrecord/train.tfrecord'
+    # import matplotlib.pyplot as plt
+    # file = '/home/chenwei/HDD/Project/YOLOv2/tfrecord/train.tfrecord'
     # tfrecord = TFRecord()
-    # batch_example, batch_label = tfrecord.parse_batch_examples(file)
+    # dataset = tfrecord.create_dataset(file, batch_size=2, is_shuffle=False)
+    # iterator = dataset.make_one_shot_iterator()
+    # images, labels = iterator.get_next()
+    #
     # with tf.Session() as sess:
-    #
-    #     init_op = tf.global_variables_initializer()
-    #     sess.run(init_op)
-    #
-    #     coord = tf.train.Coordinator()
-    #     threads = tf.train.start_queue_runners(coord=coord)
-    #     for i in range(1):
-    #         example, label = sess.run([batch_example, batch_label])
-    #         print(label)
-    #         print(label.astype(np.float32))
-    #         box = label[0, ]
-    #         # cv2.imshow('w', example[0, :, :, :])
-    #         # cv2.waitKey(0)
-    #         print(np.shape(example), np.shape(label))
-    #     # cv2.imshow('img', example)
-    #     # cv2.waitKey(0)
-    #     # print(type(example))
-    #     coord.request_stop()
-    #     # coord.clear_stop()
-    #     coord.join(threads)
+    #     for i in range(20):
+    #         images_, labels_ = sess.run([images, labels])
+    #         print(images_.shape, labels.shape)
+    #         for images_i, boxes_ in zip(images_, labels_):
+    #             data = Dataset()
+    #             y = data.preprocess_true_boxes(boxes_)
+    #             image_rgb = cv2.cvtColor(images_i, cv2.COLOR_RGB2BGR)
+    #             boxes_ = boxes_[..., 0:4] * 416
+    #             valid = (np.sum(boxes_, axis=-1) > 0).tolist()
+    #             print([int(idx) for idx in boxes_[:, 0][valid].tolist()])
+    #             for box in boxes_[:, 0:4][valid].tolist():
+    #                 cv2.rectangle(image_rgb, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (255, 0, 0), 2)
+    #             cv2.imshow("image", image_rgb)
+    #             cv2.waitKey(0)

@@ -200,10 +200,7 @@ class Dataset(object):
         image = np.array(image)
         image, labels = random_horizontal_flip(image, labels)
 
-        range_x = data_params['x_max'] - data_params['x_min']
-        range_y = data_params['y_max'] - data_params['y_min']
-
-        anchor_array = np.array([self.input_width, self.input_height]) * anchors / np.array([range_y, range_x])
+        anchor_array = np.array(anchors, dtype=np.float32)
         n_anchors = np.shape(anchor_array)[0]
 
         valid = (np.sum(labels, axis=-1) > 0).tolist()
@@ -211,9 +208,10 @@ class Dataset(object):
 
         y_true = np.zeros(shape=[self.grid_height, self.grid_width, n_anchors, (6 + 1 + self.num_classes)], dtype=np.float32)
 
-        boxes_xy = (labels[:, 0:2] + labels[:, 2:4]) / 2
-        boxes_wh = labels[:, 2:4] - labels[:, 0:2]
-        true_boxes = np.concatenate([boxes_xy, boxes_wh, labels[:, 4]], axis=-1)
+        boxes_xy = labels[:, 0:2]
+        boxes_wh = labels[:, 2:4]
+        boxes_angle = labels[:, 4]
+        true_boxes = np.concatenate([boxes_xy, boxes_wh, boxes_angle], axis=-1)
 
         anchors_max = anchor_array / 2.
         anchors_min = - anchor_array / 2.
@@ -243,7 +241,7 @@ class Dataset(object):
         for t, k in enumerate(best_anchor):
             i = int(np.floor(true_boxes[t, 0] / 32.))
             j = int(np.floor(true_boxes[t, 1] / 32.))
-            c = labels[t, 4].astype('int32')
+            c = labels[t, 5].astype('int32')
             y_true[j, i, k, 0:4] = true_boxes[t, 0:4]
             re = np.cos(true_boxes[t, 4])
             im = np.sin(true_boxes[t, 4])
