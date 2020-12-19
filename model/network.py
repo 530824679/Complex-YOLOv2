@@ -9,7 +9,7 @@
 
 import numpy as np
 import tensorflow as tf
-from cfg.config import data_params, model_params, anchors
+from cfg.config import data_params, model_params
 from model.ops import *
 
 class Network(object):
@@ -22,7 +22,7 @@ class Network(object):
         self.feature_width = model_params['grid_width']
         self.anchor_num = model_params['anchor_num']
         self.output_size = self.anchor_num * (7 + self.class_num)
-        self.anchors = anchors
+        self.anchors = model_params['anchors']
         self.iou_threshold = model_params['iou_threshold']
 
     def build_network(self, inputs, scope='yolo_v2'):
@@ -33,7 +33,10 @@ class Network(object):
         :return: 网络最终的输出
         """
         with tf.name_scope(scope):
-            net = conv2d(inputs, 64, 3, 1, is_train=self.is_train, name='conv2')
+            net = conv2d(inputs, filters_num=32, filters_size=3, pad_size=1, is_train=self.is_train, name='conv1')
+            net = maxpool(net, size=2, stride=2, name='pool1')
+
+            net = conv2d(net, 64, 3, 1, is_train=self.is_train, name='conv2')
             net = maxpool(net, 2, 2, name='pool2')
 
             net = conv2d(net, 128, 3, 1, is_train=self.is_train, name='conv3_1')

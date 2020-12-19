@@ -35,6 +35,8 @@ model_params = {
     'grid_height': 19,              # 输出特征图的网格高度
     'grid_width': 19,               # 输出特征图的网格宽度
     'anchor_num': 5,                # 每个网格负责预测的BBox个数
+    'anchors': [[5, 5], [7, 15], [18, 43], [20, 46], [28, 104]],
+    'classes': ['car', 'bus', 'truck', 'pedestrians'],  # 类别
     'num_classes': 4,               # 数据集的类别个数
     'iou_threshold': 0.5,
 }
@@ -46,7 +48,7 @@ solver_params = {
     'decay_rate': 0.95,             # 衰变率
     'staircase': True,
     'batch_size': 8,                # 每批次输入的数据个数
-    'max_iter': 1000,              # 训练的最大迭代次数
+    'epoches': 500,              # 训练的最大迭代次数
     'save_step': 1000,              # 权重保存间隔
     'log_step': 1000,               # 日志保存间隔
     'weight_decay': 0.0001,         # 正则化系数
@@ -58,7 +60,3 @@ test_params = {
     'iou_threshold': 0.4,           # nms阈值，小于0.4被过滤掉
     'max_output_size': 10           # nms选择的边界框最大数量
 }
-
-classes_map = {'car': 0, 'bus': 1, 'truck': 1, 'pedestrains': 2}
-
-anchors = [[5, 5], [7, 15], [18, 43], [20, 46], [28, 104]]

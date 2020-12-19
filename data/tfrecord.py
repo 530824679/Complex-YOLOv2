@@ -6,12 +6,16 @@
 # @File    : tfrecord.py
 # Description :create and parse tfrecord
 # --------------------------------------
-
+import sys
+ros_path = '/opt/ros/kinetic/lib/python2.7/dist-packages'
+if ros_path in sys.path:
+    sys.path.remove(ros_path)
+import cv2
 import os
 import numpy as np
 import tensorflow as tf
 from data.dataset import Dataset
-from cfg.config import path_params, model_params, solver_params, classes_map
+from cfg.config import path_params, model_params, solver_params
 
 class TFRecord(object):
     def __init__(self):
@@ -48,8 +52,14 @@ class TFRecord(object):
             lines = read.readlines()
             for line in lines:
                 pcd_num = line[0:-1]
+                print(pcd_num)
                 image = self.dataset.load_bev_image(pcd_num)
                 bboxes = self.dataset.load_bev_label(pcd_num)
+
+                valid = (np.sum(bboxes, axis=-1) > 0).tolist()
+                boxes = bboxes[valid].tolist()
+                if len(boxes) == 0:
+                    continue
 
                 image_raw = image.tobytes()
                 bbox_raw = bboxes.tobytes()
@@ -75,11 +85,11 @@ class TFRecord(object):
                 'bbox': tf.FixedLenFeature([], tf.string)
             })
 
-        tf_image = tf.decode_raw(features['image'], tf.uint8)
+        tf_image = tf.decode_raw(features['image'], tf.float32)
         tf_bbox = tf.decode_raw(features['bbox'], tf.float32)
 
         tf_image = tf.reshape(tf_image, [self.input_height, self.input_width, 3])
-        tf_label = tf.reshape(tf_bbox, [150, 7])
+        tf_label = tf.reshape(tf_bbox, [300, 6])
 
         tf_image, y_true = tf.py_func(self.dataset.preprocess_true_data, inp=[tf_image, tf_label], Tout=[tf.float32, tf.float32])
         y_true = tf.reshape(y_true, [self.grid_height, self.grid_width, 5, 6 + 1 + self.class_num])
@@ -94,7 +104,7 @@ class TFRecord(object):
         :param n_repeats: number of repeats
         :return:
         """
-        dataset = tf.data.TFRecordDataset(filenames)
+        dataset = tf.data.TFRecordDataset(filenames)#
 
         dataset = dataset.map(self.parse_single_example, num_parallel_calls=4)
         if is_shuffle:
@@ -110,9 +120,9 @@ if __name__ == '__main__':
     tfrecord.create_tfrecord()
 
     # import matplotlib.pyplot as plt
-    # file = '/home/chenwei/HDD/Project/YOLOv2/tfrecord/train.tfrecord'
+    # file = '/home/chenwei/HDD/Project/Complex-YOLOv2/tfrecord/train.tfrecord'
     # tfrecord = TFRecord()
-    # dataset = tfrecord.create_dataset(file, batch_size=2, is_shuffle=False)
+    # dataset = tfrecord.create_dataset(file, batch_num=1, batch_size=1, is_shuffle=False)
     # iterator = dataset.make_one_shot_iterator()
     # images, labels = iterator.get_next()
     #
@@ -120,14 +130,12 @@ if __name__ == '__main__':
     #     for i in range(20):
     #         images_, labels_ = sess.run([images, labels])
     #         print(images_.shape, labels.shape)
-    #         for images_i, boxes_ in zip(images_, labels_):
+    #         for images_i, boxes_i in zip(images_, labels_):
     #             data = Dataset()
-    #             y = data.preprocess_true_boxes(boxes_)
     #             image_rgb = cv2.cvtColor(images_i, cv2.COLOR_RGB2BGR)
-    #             boxes_ = boxes_[..., 0:4] * 416
-    #             valid = (np.sum(boxes_, axis=-1) > 0).tolist()
-    #             print([int(idx) for idx in boxes_[:, 0][valid].tolist()])
-    #             for box in boxes_[:, 0:4][valid].tolist():
-    #                 cv2.rectangle(image_rgb, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (255, 0, 0), 2)
+    #             valid = (np.sum(boxes_i, axis=-1) > 0).tolist()
+    #             boxes = boxes_i[valid].tolist()
+    #             for box in boxes:
+    #                 cv2.rectangle(image_rgb, (int(box[0] - box[2] / 2), int(box[1] - box[3] / 2)), (int(box[0] + box[2] / 2), int(box[1] + box[3] / 2)), (255, 0, 0), 2)
     #             cv2.imshow("image", image_rgb)
     #             cv2.waitKey(0)
