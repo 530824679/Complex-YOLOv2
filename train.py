@@ -21,17 +21,17 @@ def train():
     tfrecord_name = path_params['train_tfrecord_name']
     log_dir = path_params['logs_dir']
     batch_size = solver_params['batch_size']
+    dataset_path = path_params['train_data_path']
 
     # 配置GPU
     gpu_options = tf.GPUOptions(allow_growth=True)
     config = tf.ConfigProto(gpu_options=gpu_options)
 
     # 解析得到训练样本以及标注
-    data = tfrecord.TFRecord()
-    train_tfrecord = os.path.join(tfrecord_dir, tfrecord_name)
-    data_num = total_sample(train_tfrecord)
+    data_num = len(open(dataset_path, 'r').readlines())
     batch_num = int(math.ceil(float(data_num) / batch_size))
-    dataset = data.create_dataset(train_tfrecord, batch_num, batch_size=batch_size, is_shuffle=True)
+    data = tfrecord.TFRecord()
+    dataset = data.create_dataset(dataset_path, batch_num, batch_size=batch_size, is_shuffle=True)
     iterator = dataset.make_one_shot_iterator()
     images, y_true = iterator.get_next()
 
@@ -91,6 +91,9 @@ def train():
             for index in tqdm(range(batch_num)):
                 _, summary_, loss_, diou_loss_, angle_loss_, confs_loss_, class_loss_, global_step_, lr = sess.run(
                     [train_op, summary_op, total_loss, diou_loss, angle_loss, confs_loss, class_loss, global_step, learning_rate])
+
+                print("Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, diou_loss: {:.3f}, angle_loss: {:.3f},confs_loss: {:.3f}, class_loss: {:.3f}".format(
+                        epoch, global_step_, lr, loss_, diou_loss_, angle_loss_, confs_loss_, class_loss_))
 
                 train_epoch_loss.append(loss_)
                 train_epoch_diou_loss.append(diou_loss_)

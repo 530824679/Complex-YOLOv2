@@ -29,6 +29,7 @@ class TFRecord(object):
         self.grid_width = model_params['grid_width']
         self.class_num = model_params['num_classes']
         self.batch_size = solver_params['batch_size']
+        self.anchor_num = model_params['anchor_num']
         self.dataset = Dataset()
 
     # 数值形式的数据,首先转换为string,再转换为int形式进行保存
@@ -104,16 +105,38 @@ class TFRecord(object):
         :param n_repeats: number of repeats
         :return:
         """
-        dataset = tf.data.TFRecordDataset(filenames)#
-
-        dataset = dataset.map(self.parse_single_example, num_parallel_calls=4)
+        dataset = tf.data.TextLineDataset(filenames)
         if is_shuffle:
             dataset = dataset.shuffle(batch_num)
         dataset = dataset.batch(batch_size)
+        dataset = dataset.map(lambda x: tf.py_func(self.get_data, inp=[x], Tout=[tf.float32, tf.float32]), num_parallel_calls=8)
         dataset = dataset.repeat()
         dataset = dataset.prefetch(batch_size)
 
         return dataset
+
+    def process_data(self, line):
+        if 'str' not in str(type(line)):
+            line = line.decode()
+        data = line.split()
+        pcd_num = data[0]
+        image = self.dataset.load_bev_image(pcd_num)
+        bboxes = self.dataset.load_bev_label(pcd_num)
+
+        image, bboxes = self.dataset.preprocess_true_data(image, bboxes)
+
+        return image, bboxes
+
+    def get_data(self, batch_lines):
+        batch_image = np.zeros((solver_params['batch_size'], model_params['input_height'], model_params['input_width'], 3), dtype=np.float32)
+        batch_label = np.zeros((solver_params['batch_size'], self.grid_height, self.grid_width, self.anchor_num, (6 + 1 + self.class_num)), dtype=np.float32)
+
+        for num, line in enumerate(batch_lines):
+            image, label = self.process_data(line)
+            batch_image[num, :, :, :] = image
+            batch_label[num, :, :, :, :] = label
+
+        return batch_image, batch_label
 
 if __name__ == '__main__':
     tfrecord = TFRecord()

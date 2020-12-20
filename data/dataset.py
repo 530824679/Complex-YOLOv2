@@ -230,7 +230,7 @@ class Dataset(object):
 
     def preprocess_true_data(self, image, labels):
         image = np.array(image)
-        #image, labels = random_horizontal_flip(image, labels)
+        image, labels = random_horizontal_flip(image, labels)
 
 
         anchor_array = np.array(model_params['anchors'], dtype=np.float32)

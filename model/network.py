@@ -101,7 +101,7 @@ class Network(object):
         # 相对于anchor的wh比例，通过e指数解码
         wh_offset = tf.clip_by_value(tf.exp(feature_maps[:, :, :, 2:4]), 1e-9, 50)
         # re, im角度回归
-        remi_offset = tf.nn.sigmoid(feature_maps[:, :, :, 4:6])
+        remi_offset = 2 * tf.nn.sigmoid(feature_maps[:, :, :, 4:6]) - 1
         # 置信度，sigmoid函数归一化到0-1
         obj_probs = tf.nn.sigmoid(feature_maps[:, :, :, 6])
         # 网络回归的是得分,用softmax转变成类别概率

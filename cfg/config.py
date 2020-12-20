@@ -10,9 +10,10 @@ import os
 
 path_params = {
     'data_path': '/home/chenwei/HDD/livox_dl/LIVOX',
+    'train_data_path': '/home/chenwei/HDD/livox_dl/LIVOX/ImageSets/Main/trainval.txt',
     'checkpoints_dir': './checkpoints',
     'logs_dir': './logs',
-    'tfrecord_dir': '../tfrecord',
+    'tfrecord_dir': './tfrecord',
     'checkpoints_name': 'model.ckpt',
     'train_tfrecord_name': 'train.tfrecord',
     'test_output_dir': './test'

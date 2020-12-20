@@ -21,7 +21,8 @@ def random_horizontal_flip(image, bboxes):
     if random.random() < 0.5:
         _, w, _ = image.shape
         image = image[:, ::-1, :]
-        bboxes[:, [0, 2]] = w - bboxes[:, [2, 0]]
+        bboxes[:, 0] = w - bboxes[:, 0]
+        bboxes[:, 4] = -bboxes[:, 4]
 
     return image, bboxes
 
