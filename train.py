@@ -75,7 +75,7 @@ def train():
             ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
             if ckpt and ckpt.model_checkpoint_path:
                 stem = os.path.basename(ckpt.model_checkpoint_path)
-                restore_step = int(stem.split('.')[0].split('-')[-1])
+                restore_step = int(stem.split('.')[1].split('-')[-1])
                 start_step = restore_step
                 sess.run(global_step.assign(restore_step))
                 saver.restore(sess, ckpt.model_checkpoint_path)

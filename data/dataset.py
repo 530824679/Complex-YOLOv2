@@ -108,6 +108,20 @@ class Dataset(object):
             return -1
         return model_params['classes'].index(type)
 
+    def calc_angle(self, im, re):
+        """
+        param: im(float): imaginary parts of the plural
+        param: re(float): real parts of the plural
+        return: The angle at which the objects rotate
+        around the Z axis in the velodyne coordinate system
+        """
+        if re > 0:
+            return np.arctan(im / re)
+        elif im < 0:
+            return -np.pi + np.arctan(im / re)
+        else:
+            return np.pi + np.arctan(im / re)
+
     def load_label(self, label_path):
         lines = [line.rstrip() for line in open(label_path)]
         label_list = []

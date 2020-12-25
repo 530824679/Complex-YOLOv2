@@ -107,11 +107,11 @@ class TFRecord(object):
         """
         dataset = tf.data.TextLineDataset(filenames)
         if is_shuffle:
-            dataset = dataset.shuffle(batch_num)
+            dataset = dataset.shuffle(400)
         dataset = dataset.batch(batch_size)
         dataset = dataset.map(lambda x: tf.py_func(self.get_data, inp=[x], Tout=[tf.float32, tf.float32]), num_parallel_calls=8)
         dataset = dataset.repeat()
-        dataset = dataset.prefetch(batch_size)
+        dataset = dataset.prefetch(batch_size*5)
 
         return dataset
 

@@ -53,11 +53,13 @@ solver_params = {
     'save_step': 1000,              # 权重保存间隔
     'log_step': 1000,               # 日志保存间隔
     'weight_decay': 0.0001,         # 正则化系数
-    'restore': False                # 支持restore
+    'restore': True                # 支持restore
 }
 
 test_params = {
-    'prob_threshold': 0.01,         # 类别置信度分数阈值
-    'iou_threshold': 0.4,           # nms阈值，小于0.4被过滤掉
+    'prob_threshold': 0.5,         # 类别置信度分数阈值
+    'iou_threshold': 0.5,           # nms阈值，小于0.4被过滤掉
     'max_output_size': 10           # nms选择的边界框最大数量
 }
+
+color_map = {'car': (255, 0, 0), 'bus': (0, 255, 0), 'truck': (0, 0, 255), 'pedestrians': (128, 128, 128)}

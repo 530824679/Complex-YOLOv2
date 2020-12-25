@@ -14,6 +14,7 @@ import cv2
 import random
 import colorsys
 import numpy as np
+from cfg.config import color_map, model_params
 
 def calc_iou_wh(box1_wh, box2_wh):
     """
@@ -59,20 +60,7 @@ def calculate_iou(box_1, box_2):
 
     return iou
 
-def bboxes_cut(bbox_min_max, bboxes):
-    bboxes = np.copy(bboxes)
-    bboxes = np.transpose(bboxes)
-    bbox_min_max = np.transpose(bbox_min_max)
-
-    # cut the box
-    bboxes[0] = np.maximum(bboxes[0],bbox_min_max[0]) # xmin
-    bboxes[1] = np.maximum(bboxes[1],bbox_min_max[1]) # ymin
-    bboxes[2] = np.minimum(bboxes[2],bbox_min_max[2]) # xmax
-    bboxes[3] = np.minimum(bboxes[3],bbox_min_max[3]) # ymax
-    bboxes = np.transpose(bboxes)
-    return bboxes
-
-def bboxes_sort(classes, scores, bboxes, top_k=400):
+def bboxes_sort(classes, scores, bboxes, top_k=100):
     index = np.argsort(-scores)
     classes = classes[index][:top_k]
     scores = scores[index][:top_k]
@@ -93,21 +81,61 @@ def bboxes_nms(classes, scores, bboxes, nms_threshold=0.5):
     idxes = np.where(keep_bboxes)
     return classes[idxes], scores[idxes], bboxes[idxes]
 
+def non_maximum_suppression(classes, scores, bboxes, iou_threshold=0.5):
+    """
+    calculate the non-maximum suppression to eliminate the overlapped box
+    :param classes: shape is [num, 1] classes
+    :param scores: shape is [num, 1] scores
+    :param bboxes: shape is [num, 4] (xmin, ymin, xmax, ymax)
+    :param nms_threshold: iou threshold
+    :return:
+    """
+    scores = scores[..., np.newaxis]
+    classes = classes[..., np.newaxis]
+    results = np.concatenate([bboxes, scores, classes], axis=-1)
+    classes_in_img = list(set(results[:, 7]))
+    best_results = []
+
+    for cls in classes_in_img:
+        cls_mask = (np.array(results[:, 7], np.int32) == int(cls))
+        cls_bboxes = results[cls_mask]
+
+        while len(cls_bboxes) > 0:
+            max_ind = np.argmax(cls_bboxes[:, 6])
+            best_result = cls_bboxes[max_ind]
+            best_results.append(best_result)
+            cls_bboxes = np.concatenate([cls_bboxes[:max_ind], cls_bboxes[max_ind + 1:]])
+            overlap = calculate_iou(best_result[np.newaxis, :4], cls_bboxes[:, :4])
+
+            weight = np.ones((len(overlap),), dtype=np.float32)
+            iou_mask = overlap > iou_threshold
+            weight[iou_mask] = 0.0
+
+            cls_bboxes[:, 6] = cls_bboxes[:, 6] * weight
+            score_mask = cls_bboxes[:, 6] > 0.
+            cls_bboxes = cls_bboxes[score_mask]
+
+    return best_results
+
 # 筛选解码后的回归边界框
-def postprocess(bboxes, obj_probs, class_probs, image_shape=(416,416), threshold=0.5):
-    # boxes shape——> [num, 4]
-    bboxes = np.reshape(bboxes, [-1, 4])
+def postprocess(bboxes, obj_probs, class_probs, image_shape=(608,608), input_shape=(608, 608), threshold=0.5):
+    # boxes shape——> [num, 6]
+    bboxes = np.reshape(bboxes, [-1, 6])
 
-    # 将box还原成图片中真实的位置
-    bboxes[:, 0:1] *= float(image_shape[1])  # xmin*width
-    bboxes[:, 1:2] *= float(image_shape[0])  # ymin*height
-    bboxes[:, 2:3] *= float(image_shape[1])  # xmax*width
-    bboxes[:, 3:4] *= float(image_shape[0])  # ymax*height
-    bboxes = bboxes.astype(np.int32)
+    image_height, image_width = image_shape
+    resize_ratio = min(input_shape[1] / image_width, input_shape[0] / image_height)
 
-    # 将边界框超出整张图片(0,0)—(415,415)的部分cut掉
-    bbox_min_max = [0, 0, image_shape[1] - 1, image_shape[0] - 1]
-    bboxes = bboxes_cut(bbox_min_max, bboxes)
+    dw = (input_shape[1] - resize_ratio * image_width) / 2
+    dh = (input_shape[0] - resize_ratio * image_height) / 2
+
+    bboxes_xywh = bboxes[:, 0:4]
+    bboxes_xywh[:, 0::2] = 1.0 * (bboxes_xywh[:, 0::2] - dw) / resize_ratio
+    bboxes_xywh[:, 1::2] = 1.0 * (bboxes_xywh[:, 1::2] - dh) / resize_ratio
+    bboxes_xywh[:, 0::2] = np.clip(bboxes_xywh[:, 0::2], 0, image_width)
+    bboxes_xywh[:, 1::2] = np.clip(bboxes_xywh[:, 1::2], 0, image_height)
+    bboxes = np.concatenate([bboxes_xywh[..., 0:4], bboxes[..., 4:6]], axis=-1)
+
+    bboxes = bboxes.astype(np.float32)
 
     # 置信度 * 类别条件概率 = 类别置信度scores
     obj_probs = np.reshape(obj_probs, [-1])
@@ -126,9 +154,42 @@ def postprocess(bboxes, obj_probs, class_probs, image_shape=(416,416), threshold
     class_max_index, scores, bboxes = bboxes_sort(class_max_index, scores, bboxes)
 
     # 计算nms
+    bboxes = box_center_to_corner(bboxes)
     class_max_index, scores, bboxes = bboxes_nms(class_max_index, scores, bboxes)
-
+    bboxes = box_corner_to_center(bboxes)
+    # result = non_maximum_suppression(class_max_index, scores, bboxes)
     return bboxes, scores, class_max_index
+
+def box_center_to_corner(bbox):
+    """
+    param bbox: cx, cy, w, l, angle, class
+    return: x_min, y_min, x_max, y_max, angle, class
+    """
+    bbox_ = np.copy(bbox)
+    cx = bbox_[:, 0]
+    cy = bbox_[:, 1]
+    width = bbox_[:, 2]
+    height = bbox_[:, 3]
+    bbox[:, 0] = cx - width / 2.0
+    bbox[:, 1] = cy - height / 2.0
+    bbox[:, 2] = cx + width / 2.0
+    bbox[:, 3] = cy + height / 2.0
+    return bbox
+
+def box_corner_to_center(bbox):
+    """
+    param bbox: x_min, y_min, x_max, y_max, angle, class
+    return:  cx, cy, w, l, angle, class
+    """
+    cx = (bbox[:, 0] + bbox[:, 2]) / 2.0
+    cy = (bbox[:, 1] + bbox[:, 3]) / 2.0
+    width = bbox[:, 2] - bbox[:, 0]
+    height = bbox[:, 3] - bbox[:, 1]
+    bbox[:, 0] = cx
+    bbox[:, 1] = cy
+    bbox[:, 2] = width
+    bbox[:, 3] = height
+    return bbox
 
 def visualization(im, bboxes, scores, cls_inds, labels, thr=0.3):
     # Generate colors for drawing bounding boxes.
@@ -157,4 +218,44 @@ def visualization(im, bboxes, scores, cls_inds, labels, thr=0.3):
             text_loc = (box[0], box[1] - 10)
         cv2.putText(imgcv, mess, text_loc, cv2.FONT_HERSHEY_SIMPLEX, 1e-3 * h, (255, 255, 255), thick // 3)
     cv2.imshow("test", imgcv)
-    cv2.waitKey(0)
+    cv2.waitKey(1)
+
+def draw_rotated_box(image, cy, cx, w, h, angle, score, class_id):
+    """
+    param: img(array): RGB image
+    param: cy(int, float):  Here cy is cx in the image coordinate system
+    param: cx(int, float):  Here cx is cy in the image coordinate system
+    param: w(int, float):   box's width
+    param: h(int, float):   box's height
+    param: angle(float): rz
+    param: class_id(tuple, list): the color of box, (R, G, B)
+    """
+    left = int(cy - w / 2)
+    top = int(cx - h / 2)
+    right = int(cx + h / 2)
+    bottom = int(cy + h / 2)
+    ro = np.sqrt(pow(left - cy, 2) + pow(top - cx, 2))
+    a1 = np.arctan((w / 2) / (h / 2))
+    a2 = -np.arctan((w / 2) / (h / 2))
+    a3 = -np.pi + a1
+    a4 = np.pi - a1
+    rotated_p1_y = cy + int(ro * np.sin(angle + a1))
+    rotated_p1_x = cx + int(ro * np.cos(angle + a1))
+    rotated_p2_y = cy + int(ro * np.sin(angle + a2))
+    rotated_p2_x = cx + int(ro * np.cos(angle + a2))
+    rotated_p3_y = cy + int(ro * np.sin(angle + a3))
+    rotated_p3_x = cx + int(ro * np.cos(angle + a3))
+    rotated_p4_y = cy + int(ro * np.sin(angle + a4))
+    rotated_p4_x = cx + int(ro * np.cos(angle + a4))
+    center_p1p2y = int((rotated_p1_y + rotated_p2_y) * 0.5)
+    center_p1p2x = int((rotated_p1_x + rotated_p2_x) * 0.5)
+
+    class_name = model_params['classes'][class_id]
+    color = color_map[class_name]
+    cv2.line(image, (rotated_p1_y, rotated_p1_x), (rotated_p2_y, rotated_p2_x), color, 1)
+    cv2.line(image, (rotated_p2_y, rotated_p2_x), (rotated_p3_y, rotated_p3_x), color, 1)
+    cv2.line(image, (rotated_p3_y, rotated_p3_x), (rotated_p4_y, rotated_p4_x), color, 1)
+    cv2.line(image, (rotated_p4_y, rotated_p4_x), (rotated_p1_y, rotated_p1_x), color, 1)
+    cv2.line(image, (center_p1p2y, center_p1p2x), (cy, cx), color, 1)
+
+    cv2.putText(image, class_name + ' : {:.2f}'.format(score), (left, top), cv2.FONT_HERSHEY_PLAIN, 0.7, color, 1, cv2.LINE_AA)

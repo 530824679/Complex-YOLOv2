@@ -121,12 +121,13 @@ class Network(object):
         bboxes_wh = (rescaled_anchors * wh_offset) * ratio[::-1]
 
         if self.is_train == False:
-            bboxes_xywh = tf.concat([bboxes_xy, bboxes_wh, remi_offset], axis=-1)
+            bboxes_xywh = tf.concat([bboxes_xy, bboxes_wh], axis=-1)
             bboxes_corners = tf.stack([bboxes_xywh[..., 0] - bboxes_xywh[..., 2] / 2,
                                        bboxes_xywh[..., 1] - bboxes_xywh[..., 3] / 2,
                                        bboxes_xywh[..., 0] + bboxes_xywh[..., 2] / 2,
                                        bboxes_xywh[..., 1] + bboxes_xywh[..., 3] / 2], axis=3)
-            return bboxes_corners, obj_probs, class_probs
+            bboxes = tf.concat([bboxes_xywh, remi_offset], axis=-1)
+            return bboxes, obj_probs, class_probs
 
         bboxes_xy = tf.reshape(bboxes_xy, [-1, feature_shape[0], feature_shape[1], self.anchor_num, 2])
         bboxes_wh = tf.reshape(bboxes_wh, [-1, feature_shape[0], feature_shape[1], self.anchor_num, 2])
