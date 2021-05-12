@@ -105,14 +105,16 @@ class TFRecord(object):
         :param n_repeats: number of repeats
         :return:
         """
+        import time
+        start = time.time()
         dataset = tf.data.TextLineDataset(filenames)
         if is_shuffle:
             dataset = dataset.shuffle(400)
         dataset = dataset.batch(batch_size)
-        dataset = dataset.map(lambda x: tf.py_func(self.get_data, inp=[x], Tout=[tf.float32, tf.float32]), num_parallel_calls=8)
+        dataset = dataset.map(lambda x: tf.py_func(self.get_data, inp=[x], Tout=[tf.float32, tf.float32]), num_parallel_calls=4)
         dataset = dataset.repeat()
         dataset = dataset.prefetch(batch_size*5)
-
+        print("load data time:", time.time() - start)
         return dataset
 
     def process_data(self, line):

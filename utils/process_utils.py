@@ -122,18 +122,18 @@ def postprocess(bboxes, obj_probs, class_probs, image_shape=(608,608), input_sha
     # boxes shape——> [num, 6]
     bboxes = np.reshape(bboxes, [-1, 6])
 
-    image_height, image_width = image_shape
-    resize_ratio = min(input_shape[1] / image_width, input_shape[0] / image_height)
-
-    dw = (input_shape[1] - resize_ratio * image_width) / 2
-    dh = (input_shape[0] - resize_ratio * image_height) / 2
-
-    bboxes_xywh = bboxes[:, 0:4]
-    bboxes_xywh[:, 0::2] = 1.0 * (bboxes_xywh[:, 0::2] - dw) / resize_ratio
-    bboxes_xywh[:, 1::2] = 1.0 * (bboxes_xywh[:, 1::2] - dh) / resize_ratio
-    bboxes_xywh[:, 0::2] = np.clip(bboxes_xywh[:, 0::2], 0, image_width)
-    bboxes_xywh[:, 1::2] = np.clip(bboxes_xywh[:, 1::2], 0, image_height)
-    bboxes = np.concatenate([bboxes_xywh[..., 0:4], bboxes[..., 4:6]], axis=-1)
+    # image_height, image_width = image_shape
+    # resize_ratio = min(input_shape[1] / image_width, input_shape[0] / image_height)
+    #
+    # dw = (input_shape[1] - resize_ratio * image_width) / 2
+    # dh = (input_shape[0] - resize_ratio * image_height) / 2
+    #
+    # bboxes_xywh = bboxes[:, 0:4]
+    # bboxes_xywh[:, 0::2] = 1.0 * (bboxes_xywh[:, 0::2] - dw) / resize_ratio
+    # bboxes_xywh[:, 1::2] = 1.0 * (bboxes_xywh[:, 1::2] - dh) / resize_ratio
+    # bboxes_xywh[:, 0::2] = np.clip(bboxes_xywh[:, 0::2], 0, image_width)
+    # bboxes_xywh[:, 1::2] = np.clip(bboxes_xywh[:, 1::2], 0, image_height)
+    # bboxes = np.concatenate([bboxes_xywh[..., 0:4], bboxes[..., 4:6]], axis=-1)
 
     bboxes = bboxes.astype(np.float32)
 

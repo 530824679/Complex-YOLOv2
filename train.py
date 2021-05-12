@@ -85,16 +85,18 @@ def train():
 
         summary_writer.add_graph(sess.graph)
 
+        import time
         print('\n----------- start to train -----------\n')
         for epoch in range(start_step + 1, solver_params['epoches']):
             train_epoch_loss, train_epoch_diou_loss, train_epoch_angle_loss, train_epoch_confs_loss, train_epoch_class_loss = [], [], [], [], []
             for index in tqdm(range(batch_num)):
+                start = time.time()
                 _, summary_, loss_, diou_loss_, angle_loss_, confs_loss_, class_loss_, global_step_, lr = sess.run(
                     [train_op, summary_op, total_loss, diou_loss, angle_loss, confs_loss, class_loss, global_step, learning_rate])
 
                 print("Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, diou_loss: {:.3f}, angle_loss: {:.3f},confs_loss: {:.3f}, class_loss: {:.3f}".format(
                         epoch, global_step_, lr, loss_, diou_loss_, angle_loss_, confs_loss_, class_loss_))
-
+                print("train time:", time.time() - start)
                 train_epoch_loss.append(loss_)
                 train_epoch_diou_loss.append(diou_loss_)
                 train_epoch_angle_loss.append(angle_loss_)
@@ -106,7 +108,7 @@ def train():
             train_epoch_loss, train_epoch_diou_loss, train_epoch_angle_loss, train_epoch_confs_loss, train_epoch_class_loss = np.mean(
                 train_epoch_loss), np.mean(train_epoch_diou_loss), np.mean(train_epoch_angle_loss),np.mean(train_epoch_confs_loss), np.mean(train_epoch_class_loss)
             print("Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, diou_loss: {:.3f}, angle_loss: {:.3f},confs_loss: {:.3f}, class_loss: {:.3f}".format(
-                    epoch, global_step_, lr, train_epoch_loss, train_epoch_diou_loss, train_epoch_angle_loss, train_epoch_confs_loss, train_epoch_class_loss))
+                epoch, global_step_, lr, train_epoch_loss, train_epoch_diou_loss, train_epoch_angle_loss, train_epoch_confs_loss, train_epoch_class_loss))
             saver.save(sess, os.path.join(checkpoint_dir, checkpoints_name), global_step=epoch)
 
         sess.close()

@@ -132,3 +132,5 @@ tfrecord/
 checkpoints/
 logs/
 test/
+test_wulin/
+pb/

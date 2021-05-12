@@ -89,51 +89,48 @@ class Network(object):
         :param anchors:
         :return: 网络最终的输出
         """
-        feature_shape = tf.shape(feature_maps)[1:3]
+        with tf.name_scope('reorg_layer'):
+            feature_shape = tf.shape(feature_maps)[1:3]
 
-        ratio = tf.cast([self.input_height, self.input_width] / feature_shape, tf.float32)
-        rescaled_anchors = [(anchor[0] / ratio[1], anchor[1] / ratio[0]) for anchor in anchors]
+            ratio = tf.cast([self.input_height, self.input_width] / feature_shape, tf.float32)
+            rescaled_anchors = [(anchor[0] / ratio[1], anchor[1] / ratio[0]) for anchor in anchors]
 
-        # 网络输出转化——偏移量、置信度、类别概率
-        feature_maps = tf.reshape(feature_maps, [-1, feature_shape[0] * feature_shape[1], self.anchor_num, self.class_num + 7])
-        # 中心坐标相对于该cell左上角的偏移量，sigmoid函数归一化到0-1
-        xy_offset = tf.nn.sigmoid(feature_maps[:, :, :, 0:2])
-        # 相对于anchor的wh比例，通过e指数解码
-        wh_offset = tf.clip_by_value(tf.exp(feature_maps[:, :, :, 2:4]), 1e-9, 50)
-        # re, im角度回归
-        remi_offset = 2 * tf.nn.sigmoid(feature_maps[:, :, :, 4:6]) - 1
-        # 置信度，sigmoid函数归一化到0-1
-        obj_probs = tf.nn.sigmoid(feature_maps[:, :, :, 6])
-        # 网络回归的是得分,用softmax转变成类别概率
-        class_probs = tf.nn.softmax(feature_maps[:, :, :, 7:])
+            # 网络输出转化——偏移量、置信度、类别概率
+            feature_maps = tf.reshape(feature_maps, [-1, feature_shape[0] * feature_shape[1], self.anchor_num, self.class_num + 7])
+            # 中心坐标相对于该cell左上角的偏移量，sigmoid函数归一化到0-1
+            xy_offset = tf.nn.sigmoid(feature_maps[:, :, :, 0:2])
+            # 相对于anchor的wh比例，通过e指数解码
+            wh_offset = tf.clip_by_value(tf.exp(feature_maps[:, :, :, 2:4]), 1e-9, 50)
+            # re, im角度回归
+            remi_offset = 2 * tf.nn.sigmoid(feature_maps[:, :, :, 4:6]) - 1
+            # 置信度，sigmoid函数归一化到0-1
+            obj_probs = tf.nn.sigmoid(feature_maps[:, :, :, 6], name='obj_probs')
+            # 网络回归的是得分,用softmax转变成类别概率
+            class_probs = tf.nn.softmax(feature_maps[:, :, :, 7:], name='class_probs')
 
-        # 构建特征图每个cell的左上角的xy坐标
-        height_index = tf.range(tf.cast(feature_shape[0], tf.float32), dtype=tf.float32)
-        width_index = tf.range(tf.cast(feature_shape[1], tf.float32), dtype=tf.float32)
-        # 变成x_cell=[[0,1,...,12],...,[0,1,...,12]]和y_cell=[[0,0,...,0],[1,...,1]...,[12,...,12]]
-        x_cell, y_cell = tf.meshgrid(height_index, width_index)
+            # 构建特征图每个cell的左上角的xy坐标
+            height_index = tf.range(tf.cast(feature_shape[0], tf.float32), dtype=tf.float32)
+            width_index = tf.range(tf.cast(feature_shape[1], tf.float32), dtype=tf.float32)
+            # 变成x_cell=[[0,1,...,12],...,[0,1,...,12]]和y_cell=[[0,0,...,0],[1,...,1]...,[12,...,12]]
+            x_cell, y_cell = tf.meshgrid(height_index, width_index)
 
-        x_cell = tf.reshape(x_cell, [1, -1, 1])
-        y_cell = tf.reshape(y_cell, [1, -1, 1])
-        xy_cell = tf.stack([x_cell, y_cell], axis=-1)
+            x_cell = tf.reshape(x_cell, [1, -1, 1])
+            y_cell = tf.reshape(y_cell, [1, -1, 1])
+            xy_cell = tf.stack([x_cell, y_cell], axis=-1)
 
-        bboxes_xy = (xy_cell + xy_offset) * ratio[::-1]
-        bboxes_wh = (rescaled_anchors * wh_offset) * ratio[::-1]
+            bboxes_xy = (xy_cell + xy_offset) * ratio[::-1]
+            bboxes_wh = (rescaled_anchors * wh_offset) * ratio[::-1]
 
-        if self.is_train == False:
             bboxes_xywh = tf.concat([bboxes_xy, bboxes_wh], axis=-1)
-            bboxes_corners = tf.stack([bboxes_xywh[..., 0] - bboxes_xywh[..., 2] / 2,
-                                       bboxes_xywh[..., 1] - bboxes_xywh[..., 3] / 2,
-                                       bboxes_xywh[..., 0] + bboxes_xywh[..., 2] / 2,
-                                       bboxes_xywh[..., 1] + bboxes_xywh[..., 3] / 2], axis=3)
-            bboxes = tf.concat([bboxes_xywh, remi_offset], axis=-1)
-            return bboxes, obj_probs, class_probs
+            bboxes = tf.concat([bboxes_xywh, remi_offset], axis=-1, name='bboxes_probs')
+            if self.is_train == False:
+                return bboxes, obj_probs, class_probs
 
-        bboxes_xy = tf.reshape(bboxes_xy, [-1, feature_shape[0], feature_shape[1], self.anchor_num, 2])
-        bboxes_wh = tf.reshape(bboxes_wh, [-1, feature_shape[0], feature_shape[1], self.anchor_num, 2])
-        bboxes_remi = tf.reshape(remi_offset, [-1, feature_shape[0], feature_shape[1], self.anchor_num, 2])
+            bboxes_xy = tf.reshape(bboxes_xy, [-1, feature_shape[0], feature_shape[1], self.anchor_num, 2])
+            bboxes_wh = tf.reshape(bboxes_wh, [-1, feature_shape[0], feature_shape[1], self.anchor_num, 2])
+            bboxes_remi = tf.reshape(remi_offset, [-1, feature_shape[0], feature_shape[1], self.anchor_num, 2])
 
-        return bboxes_xy, bboxes_wh, bboxes_remi
+            return bboxes_xy, bboxes_wh, bboxes_remi
 
     def calc_loss(self, logits, y_true):
         feature_size = tf.shape(logits)[1:3]

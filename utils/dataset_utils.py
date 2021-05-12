@@ -42,27 +42,54 @@ def freeze_graph(checkpoints_path, output_graph):
     :return:
     """
     with tf.Graph().as_default():
-        images = tf.placeholder(shape=[None, model_params['input_height'], model_params['input_width'], model_params['channels']], dtype=tf.float32, name='inputs')
-        output_node_names = "yolo_v2/logits"
-        with tf.variable_scope('yolo_v2'):
-            Model = network.Network(is_train=False)
-            logits = Model.build_network(images)
-            with tf.Session() as sess:
-                saver = tf.train.Saver()
-                saver.restore(sess, checkpoints_path)  #恢复图并得到数据
-                graph = tf.get_default_graph()
-                output_graph_def = graph_util.convert_variables_to_constants(
-                    sess=sess,
-                    input_graph_def=sess.graph_def,
-                    output_node_names=output_node_names.split(","))
+        image = tf.placeholder(shape=[None, 608, 608, 3], dtype=tf.float32, name='inputs')
 
-                # remove training nodes
-                output_graph_def = graph_util.remove_training_nodes(
-                    output_graph_def)  #删除训练层，只保留主干
-                with tf.gfile.GFile(output_graph, "wb") as f:  #保存模型
-                    f.write(output_graph_def.SerializeToString())  #序列化输出
-                print("%d ops in the final graph." %len(output_graph_def.node))  #得到当前图有几个操作节点
+        # 指定输出的节点名称,该节点名称必须是原模型中存在的节点
+        output_node_names = "reorg_layer/obj_probs,reorg_layer/class_probs,reorg_layer/bboxes_probs"
 
+        # 从模型代码中获取结构
+        Model = network.Network(is_train=False)
+        logits = Model.build_network(image)
+        output = Model.reorg_layer(logits, model_params['anchors'])
+
+        # 从meta中获取结构
+        #saver = tf.train.import_meta_graph(checkpoints_path + '.meta', clear_devices=True)
+
+        # 获得默认的图
+        graph = tf.get_default_graph()
+
+        # 返回一个序列化的图代表当前的图
+        input_graph_def = graph.as_graph_def()
+
+        with tf.Session() as sess:
+            saver = tf.train.Saver()
+            # 恢复图并得到数据
+            saver.restore(sess, checkpoints_path)
+
+            # 模型持久化，将变量值固定
+            output_graph_def = graph_util.convert_variables_to_constants(
+                sess=sess,
+                input_graph_def=input_graph_def,
+                output_node_names=output_node_names.split(","))
+
+            # 删除训练层，只保留主干
+            output_graph_def = graph_util.remove_training_nodes(
+                output_graph_def)
+
+            # 保存模型
+            with tf.gfile.GFile(output_graph, "wb") as f:
+
+                # 序列化输出
+                f.write(output_graph_def.SerializeToString())
+
+            # 得到当前图有几个操作节点
+            print("%d ops in the final graph." %len(output_graph_def.node))
+
+            # for op in graph.get_operations():
+            #     print(op.name, op.values())
 
 if __name__ == '__main__':
-    create_trainval_txt(path_params['data_path'])
+    #create_trainval_txt(path_params['data_path'])
+    input_checkpoint='/home/chenwei/HDD/Project/Complex-YOLOv2/checkpoints/model.ckpt-43'
+    out_pb_path="/home/chenwei/HDD/Project/Complex-YOLOv2/pb/frozen_model.pb"
+    freeze_graph(input_checkpoint, out_pb_path)

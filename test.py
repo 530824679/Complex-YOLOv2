@@ -29,7 +29,7 @@ def test(test_path):
     data = Dataset()
     saver = tf.train.Saver()
     with tf.Session() as sess:
-        saver.restore(sess, "./checkpoints/model.ckpt-14")
+        saver.restore(sess, "./checkpoints/model.ckpt-181")
 
         file_list = os.listdir(test_path)
         for filename in file_list:
